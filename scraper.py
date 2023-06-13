@@ -9,7 +9,6 @@ from model import ToolTable
 from database import async_session
 from utils import create_async_db_connection
 from sqlalchemy.exc import StatementError, IntegrityError
-from abc import ABC, abstractmethod
 from playwright.async_api import async_playwright
 from playwright_setup import PlaywrightSetup
 
@@ -51,44 +50,22 @@ async def startup_event_scrape(scrape_limit, scraper):
         await playwright_setup.teardown()
 
 
-class BaseScraper(ABC):
-    def __init__(self, base_url, scrape_limit, redis_cache, session):
-        self.base_url = base_url
+class CustomScraper(PlaywrightSetup):
+    def __init__(self, base_url, scrape_limit, redis_cache, session, page, browser):
+        super().__init__(base_url)
         self.scrape_limit = scrape_limit
         self.redis_cache = redis_cache
         self.session = session
-        self.playwright = None
-        self.browser = None
-        self.page = None
+        self.page = page
+        self.browser = browser  # Add this line
 
-    @abstractmethod
-    async def setup(self):
-        pass
-
-    @abstractmethod
-    async def scrape_tools(self):
-        pass
-
-    async def scrape(self):
-        await self.setup()
-        await self.scrape_tools()
-
-
-class CustomScraper(BaseScraper):
-    async def setup(self):
-        self.playwright = await async_playwright().start()
-        self.browser = await self.playwright.chromium.launch()
-        print(f"Returning driver: {self.browser}")
-        self.page = await self.browser.new_page()
-
-    async def teardown(self):
-        await self.browser.close()
-        await self.playwright.stop()
+    async def initialize(self):
+        self.page = await self.setup()
 
     async def safe_get_attribute(self, element, attr_name, retries=1):
         for _ in range(retries + 1):
             try:
-                return await element.get_attribute(attr_name)
+                return await self.page.evaluate(f'el => el.getAttribute("{attr_name}")', element)
             except Exception:
                 continue
         return None
@@ -107,7 +84,7 @@ class CustomScraper(BaseScraper):
             description = await self.page.inner_text("div.rich-text-block.w-richtext")
             additional_info = await self.page.inner_text("div.text-block-18")
             # Extract redirected tool elements
-            final_url = await self.page.get_attribute("div.div-block-6 > a", "href")
+            final_url = await self.safe_get_attribute(await self.page.query_selector("div.div-block-6 > a"), "href")
 
             # Return tool data as a dictionary
             return {
@@ -310,6 +287,5 @@ class CustomScraper(BaseScraper):
             # Close the session after all tools have been processed
             self.session.expunge_all()
             await self.session.close()
-            await self.browser.close()
         else:
             raise RuntimeError("Failed to initialize driver")

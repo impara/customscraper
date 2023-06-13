@@ -17,3 +17,10 @@ class PlaywrightSetup:
         await self.context.close()
         await self.browser.close()
         await self.playwright.stop()
+
+    async def intercept_request(self, route, request):
+        # Block unnecessary resources
+        if request.resource_type in ["image", "stylesheet", "script"]:
+            await route.abort()
+        else:
+            await route.continue_()

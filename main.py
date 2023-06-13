@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from typing import List
 from redis_cache import RedisCache
 import os
+from playwright_setup import PlaywrightSetup
 
 URL_TO_SCRAP = os.getenv("URL_TO_SCRAP")
 # Create a custom logger
@@ -64,9 +65,16 @@ async def startup_event():
 
 @app.get("/scrape", include_in_schema=False)
 async def scrape(scrape_limit: int = 10, db: AsyncSession = Depends(get_db), redis_cache: RedisCache = Depends(RedisCache)):
-    custom_scraper = CustomScraper(
-        URL_TO_SCRAP, scrape_limit, redis_cache, db)
-    await startup_event_scrape(scrape_limit, custom_scraper)
+    playwright_setup = PlaywrightSetup(URL_TO_SCRAP)
+    page = await playwright_setup.setup()
+
+    try:
+        custom_scraper = CustomScraper(
+            URL_TO_SCRAP, scrape_limit, redis_cache, db, page, playwright_setup.browser)
+        await custom_scraper.scrape_tools()
+    finally:
+        await playwright_setup.teardown()
+
     return {"message": "Scraping started"}
 
 
