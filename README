@@ -1,0 +1,23 @@
+# customscraper
+Web scraping task that handles a variety of potential issues
+This script is a good example of a web scraping task that handles a variety of potential issues, such as handling duplicates and page navigation (including infinite scrolling). It is designed to be efficient by using both Redis caching and Postgres database, and it is robust in its handling of exceptions. The use of asynchronous programming also helps improve performance by allowing other tasks to progress while waiting for network or database operations.
+
+Here is the detailed breakdown:
+
+If a Selenium WebDriver is successfully initialized, it navigates to the base URL.
+The method then starts a while-loop until it reaches the scrape limit (maximum number of pages to scrape).
+Within the loop, the script first extracts links from the current page using the extract_links() method, and checks if the new set of URLs is different from the previous ones.
+If not, it breaks the loop; otherwise, it fetches the tool data from Redis, checks if it has already been scraped or exists in the database. If the tool already exists in the database, the script adds it to Redis and continues.
+If the tool is not in the Redis cache or database, the script proceeds to scrape data using the extract_tool_data() method. If it fails to extract data, it skips the tool.
+After successfully extracting data, the script prints tool information, fetches the final URL, adds the tool to the database and Redis cache, and increments the counter of scraped tools.
+The changes are then committed to the database. If an integrity error (duplicate entry) is encountered, it is logged and the session is rolled back.
+If no new tools are found, the script attempts to load more tools by scrolling the page, waiting for the new tools to load.
+Finally, the session is closed after all tools have been processed and the WebDriver quits.
+
+You need to install selenium webdriver and export the following:
+
+export DATABASE_URL="postgresql+asyncpg://username:password@localhost/postgres"
+
+export REDIS_URL="redis://localhost"
+
+export URL_TO_SCRAP="SITE TO SCRAP"
