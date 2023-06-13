@@ -14,7 +14,7 @@ The changes are then committed to the database. If an integrity error (duplicate
 If no new tools are found, the script attempts to load more tools by scrolling the page, waiting for the new tools to load.
 Finally, the session is closed after all tools have been processed and the WebDriver quits.
 
-You need to install selenium webdriver and export the following:
+Dockerfile included, you need to export the following:
 
 export DATABASE_URL="postgresql+asyncpg://username:password@localhost/postgres"
 
