@@ -2,11 +2,6 @@ import json
 import asyncio
 from datetime import datetime
 from sqlalchemy import select
-from selenium.webdriver.common.by import By
-from selenium_setup import SeleniumSetup
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
-from selenium.common.exceptions import StaleElementReferenceException, NoSuchElementException, TimeoutException, WebDriverException
 from urllib.parse import urljoin
 from redis_cache import RedisCache
 import logging
@@ -15,11 +10,13 @@ from database import async_session
 from utils import create_async_db_connection
 from sqlalchemy.exc import StatementError, IntegrityError
 from abc import ABC, abstractmethod
+from playwright.async_api import async_playwright
+from playwright_setup import PlaywrightSetup
+
 
 from urllib.parse import urlparse
 import time
-# Set the logging level for Selenium Wire
-logging.getLogger('seleniumwire').setLevel(logging.WARNING)
+
 # Create a custom logger
 logger = logging.getLogger(__name__)
 # Set your constants
@@ -30,16 +27,28 @@ async def startup_event_scrape(scrape_limit, scraper):
     # Initialize RedisCache
     redis_cache = RedisCache()
     redis_pool = await redis_cache.get_redis_pool()
+
+    # Create an instance of PlaywrightSetup
+    # Use the base_url from the scraper
+    playwright_setup = PlaywrightSetup(scraper.base_url)
+    # Start the Playwright process and open a new page
+    page = await playwright_setup.setup()
+
     try:
         async with async_session() as session:
             # Use SQLAlchemy Core statements with async session
             scraper.redis_cache = redis_cache
             scraper.session = session
+            scraper.page = page  # Pass the page object to the scraper
             await scraper.scrape()
 
     except StatementError as e:
         logger.error("Error during startup event: %s", e)
         raise
+
+    finally:
+        # After you're done with your scraping logic, close the browser and stop the Playwright process
+        await playwright_setup.teardown()
 
 
 class BaseScraper(ABC):
@@ -48,6 +57,9 @@ class BaseScraper(ABC):
         self.scrape_limit = scrape_limit
         self.redis_cache = redis_cache
         self.session = session
+        self.playwright = None
+        self.browser = None
+        self.page = None
 
     @abstractmethod
     async def setup(self):
@@ -64,137 +76,109 @@ class BaseScraper(ABC):
 
 class CustomScraper(BaseScraper):
     async def setup(self):
-        selenium_setup = SeleniumSetup(self.base_url)
-        self.driver = await selenium_setup.setup()
-        print(f"Returning driver: {self.driver}")
-        return self.driver
+        self.playwright = await async_playwright().start()
+        self.browser = await self.playwright.chromium.launch()
+        print(f"Returning driver: {self.browser}")
+        self.page = await self.browser.new_page()
 
-    def safe_get_attribute(self, element, attr_name, retries=1):
+    async def teardown(self):
+        await self.browser.close()
+        await self.playwright.stop()
+
+    async def safe_get_attribute(self, element, attr_name, retries=1):
         for _ in range(retries + 1):
             try:
-                return element.get_attribute(attr_name)
-            except StaleElementReferenceException:
+                return await element.get_attribute(attr_name)
+            except Exception:
                 continue
         return None
 
-    def extract_tool_data(self, tool_url):
+    async def extract_tool_data(self, tool_url):
         # Navigate to the tool URL
-        self.driver.get(tool_url)
-
-        # Wait for the page to load
-        WebDriverWait(self.driver, 10).until(
-            lambda driver: driver.execute_script(
-                "return document.readyState") == "complete"
-        )
-
-        # Wait for AJAX calls to complete
-        # WebDriverWait(self.driver, 10).until(
-        #    lambda driver: driver.execute_script("return jQuery.active") == 0
-        # )
+        await self.page.goto(tool_url)
 
         # Add a delay to respect rate limits
-        time.sleep(0.5)
+        await asyncio.sleep(0.5)
 
         try:
             # Extract the tool information
-            name = self.driver.find_element(
-                By.CSS_SELECTOR, "h1.heading-3").text.strip()
-            pricing_model = self.driver.find_element(
-                By.CSS_SELECTOR, "div.text-block-2").text.strip()
-            description = self.driver.find_element(
-                By.CSS_SELECTOR, "div.rich-text-block.w-richtext").text.strip()
-            additional_info = self.driver.find_element(
-                By.CSS_SELECTOR, "div.text-block-18").text.strip()
+            name = await self.page.inner_text("h1.heading-3")
+            pricing_model = await self.page.inner_text("div.text-block-2")
+            description = await self.page.inner_text("div.rich-text-block.w-richtext")
+            additional_info = await self.page.inner_text("div.text-block-18")
             # Extract redirected tool elements
-            redirected_tool_elements = self.driver.find_element(
-                By.CSS_SELECTOR, "div.div-block-6 > a")
-
-            # Get all redirected tool URLs
-            final_url = redirected_tool_elements.get_attribute("href")
+            final_url = await self.page.get_attribute("div.div-block-6 > a", "href")
 
             # Return tool data as a dictionary
             return {
-                'name': name,
-                'pricing_model': pricing_model,
-                'description': description,
-                'additional_info': additional_info,
+                'name': name.strip(),
+                'pricing_model': pricing_model.strip(),
+                'description': description.strip(),
+                'additional_info': additional_info.strip(),
                 'final_url': final_url,
                 'url': tool_url,
             }
-        except NoSuchElementException:
-            print(f"Element not found when extracting data from {tool_url}")
-            return None
         except Exception as e:
             print(
                 f"Unexpected error extracting data from {tool_url}: {str(e)}")
             return None
 
-    def fetch(self, url, max_retries=2):
+    async def fetch(self, url, max_retries=2):
         # Defining the retry loop
         for attempt in range(max_retries):
             try:
                 # Open a new tab
-                self.driver.execute_script("window.open('');")
-                # Switch to the new tab (it's always the last one)
-                self.driver.switch_to.window(self.driver.window_handles[-1])
+                new_page = await self.browser.new_page()
                 # Navigate to the URL
-                self.driver.get(url)
+                await new_page.goto(url)
                 # Get the final URL
-                final_url = self.driver.current_url
+                final_url = new_page.url
                 # Close the current tab
-                self.driver.close()
-                # Switch back to the first tab
-                self.driver.switch_to.window(self.driver.window_handles[0])
+                await new_page.close()
                 return final_url
-            except WebDriverException as e:
-                logging.error(f'Error occurred when fetching URL {url}: {e}')
+            except Exception as e:
+                print(f'Error occurred when fetching URL {url}: {e}')
                 # If it's not the last attempt, wait for a bit before retrying
                 if attempt < max_retries - 1:
-                    time.sleep(2 ** attempt)  # Exponential backoff
+                    await asyncio.sleep(2 ** attempt)  # Exponential backoff
                     continue
                 else:
                     return None  # Return None after all retries have failed
 
-    def extract_links(self):
+    async def extract_links(self):
         try:
             # Wait for the page to load
-            WebDriverWait(self.driver, 10).until(
-                lambda driver: driver.execute_script(
-                    "return document.readyState") == "complete"
-            )
-            # Wait for the tool links to load
-            WebDriverWait(self.driver, 10).until(
-                EC.presence_of_element_located(
-                    (By.CSS_SELECTOR, "div.tool-item-text-link-block---new a.tool-item-link---new"))
-            )
-        except TimeoutException:
+            await self.page.wait_for_load_state("networkidle")
+        except Exception:
             print(
                 "TimeoutException occurred while waiting for elements. Skipping this page.")
             return []
 
-        time.sleep(0.5)
+        await asyncio.sleep(0.5)
         # Extract site tool elements
-        tool_elements = self.driver.find_elements(
-            By.CSS_SELECTOR, "div.tool-item-text-link-block---new a.tool-item-link---new")
+        tool_elements = await self.page.query_selector_all("div.tool-item-text-link-block---new a.tool-item-link---new")
 
         # Log the number of links found
         print(f"Number of tool links found: {len(tool_elements)}")
 
         # Fetch all tool URLs at once
-        tool_urls = [urljoin(self.base_url, self.safe_get_attribute(element, "href"))
-                     for element in tool_elements]
+        tool_urls = []
+        for element in tool_elements:
+            href = await self.safe_get_attribute(element, "href")
+            tool_urls.append(urljoin(self.base_url, href))
 
         return tool_urls
 
     async def scrape_tools(self):
-        if self.driver is not None:
-            self.driver.get(self.base_url)
+        if self.page is not None:
+            await self.page.goto(self.base_url)
+
             tools_scraped = 0
             start_scraping = False
 
             while tools_scraped < self.scrape_limit:
                 while not start_scraping:
-                    tool_urls = self.extract_links()
+                    tool_urls = await self.extract_links()
 
                     # Fetch all tool data from Redis at once
                     tool_data_list = await self.redis_cache.mget(*tool_urls)
@@ -237,7 +221,7 @@ class CustomScraper(BaseScraper):
                             start_scraping = True
                             break
                     # Tool is not in Redis cache or database, proceed with scraping
-                    tool_data = self.extract_tool_data(tool_url)
+                    tool_data = await self.extract_tool_data(tool_url)
                     if tool_data is None:
                         print(
                             f"Failed to extract data from {tool_url}. Skipping this tool.")
@@ -251,7 +235,7 @@ class CustomScraper(BaseScraper):
                     print(f"Final url: {tool_data['final_url']}")
 
                     # Fetch the final URL
-                    fetch_url = self.fetch(tool_data['final_url'])
+                    fetch_url = await self.fetch(tool_data['final_url'])
 
                     # If fetch failed, skip this iteration
                     if not fetch_url:
@@ -308,14 +292,14 @@ class CustomScraper(BaseScraper):
                     print("No new tools found. Scrolling to load more tools.")
 
                     # Scroll in smaller increments and wait for the specific element to load
-                    scroll_height = self.driver.execute_script(
-                        "return document.body.scrollHeight;")
+                    scroll_height = await self.page.evaluate("() => document.body.scrollHeight")
                     for i in range(0, scroll_height, 250):
-                        self.driver.execute_script(f"window.scrollTo(0, {i});")
-                        WebDriverWait(self.driver, 10).until(
-                            EC.presence_of_element_located(
-                                (By.CSS_SELECTOR, "div.tool-item-text-link-block---new a.tool-item-link---new"))
-                        )
+                        await self.page.evaluate(f"window.scrollTo(0, {i})")
+                        try:
+                            await self.page.wait_for_selector("div.tool-item-text-link-block---new a.tool-item-link---new", timeout=10000)
+                        except Exception:
+                            print(
+                                "TimeoutException occurred while waiting for elements. Skipping this page.")
                         # Wait for the new tools to load
                         await asyncio.sleep(0.5)
 
@@ -326,6 +310,6 @@ class CustomScraper(BaseScraper):
             # Close the session after all tools have been processed
             self.session.expunge_all()
             await self.session.close()
-            self.driver.quit()
+            await self.browser.close()
         else:
             raise RuntimeError("Failed to initialize driver")
