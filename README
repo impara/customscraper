@@ -1,20 +1,24 @@
-# customscraper
-Web scraping task that handles a variety of potential issues
-This script is a good example of a web scraping task that handles a variety of potential issues, such as handling duplicates and page navigation (including infinite scrolling). It is designed to be efficient by using both Redis caching and Postgres database, and it is robust in its handling of exceptions. The use of asynchronous programming also helps improve performance by allowing other tasks to progress while waiting for network or database operations.
+This Python application is a web scraper that extracts data from a website and stores it in a database and a Redis cache. It uses the Playwright library for browser automation and SQLAlchemy for interacting with the database. The application is designed to be robust and efficient, with features like error handling, retries, and asynchronous programming.
 
-Here is the detailed breakdown:
+Here's a high-level overview of what the application does:
 
-If a Selenium WebDriver is successfully initialized, it navigates to the base URL.
-The method then starts a while-loop until it reaches the scrape limit (maximum number of pages to scrape).
-Within the loop, the script first extracts links from the current page using the extract_links() method, and checks if the new set of URLs is different from the previous ones.
-If not, it breaks the loop; otherwise, it fetches the tool data from Redis, checks if it has already been scraped or exists in the database. If the tool already exists in the database, the script adds it to Redis and continues.
-If the tool is not in the Redis cache or database, the script proceeds to scrape data using the extract_tool_data() method. If it fails to extract data, it skips the tool.
-After successfully extracting data, the script prints tool information, fetches the final URL, adds the tool to the database and Redis cache, and increments the counter of scraped tools.
-The changes are then committed to the database. If an integrity error (duplicate entry) is encountered, it is logged and the session is rolled back.
-If no new tools are found, the script attempts to load more tools by scrolling the page, waiting for the new tools to load.
-Finally, the session is closed after all tools have been processed and the WebDriver quits.
+Initialization: The application sets up logging, creates a Redis cache, and initializes a Playwright browser instance.
 
-Dockerfile included, you need to export the following:
+Scraping: The main scraping logic is encapsulated in the CustomScraper class. This class has methods for safely getting attributes and inner text from HTML elements, extracting data from a specific URL, fetching a URL with retries, and extracting links from a page.
+
+Data Extraction: The scraper navigates to each tool URL and extracts the tool's name, pricing model, description, additional information, and final URL. It also handles navigation errors and retries failed navigations.
+
+Data Processing: The extracted data is processed and stored in a ToolTable object, which is then added to the database session. The application also checks if the tool data already exists in the Redis cache before processing it.
+
+Data Storage: The application commits the changes to the database and stores the tool data in the Redis cache. It also handles database errors and rolls back the session if necessary.
+
+Concurrency: The application uses asyncio to perform multiple tasks concurrently. This includes fetching URLs, extracting data, and storing data in the database and cache.
+
+Error Handling: The application has extensive error handling to deal with issues like navigation errors, extraction errors, and database errors. It logs these errors and retries failed operations where appropriate.
+
+This application is ideal for scraping and storing data from a website in a structured format. It's designed to be robust, efficient, and easy to extend with additional functionality.
+
+Dockerfile included, you need to export the following or use .env:
 
 export DATABASE_URL="postgresql+asyncpg://username:password@localhost/postgres"
 

@@ -2,12 +2,9 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker
 import os
-# Create the engine and the sessionmaker outside of the function
-engine = create_async_engine(
-    os.getenv("DATABASE_URL"), echo=False,
-)
-async_session = sessionmaker(
-    engine, expire_on_commit=False, class_=AsyncSession)
+
+# Use the same engine and sessionmaker as in database.py
+from database import engine, async_session
 
 
 async def create_async_db_connection():

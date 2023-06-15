@@ -1,7 +1,7 @@
 from typing import Optional
 import uvicorn
 from fastapi import FastAPI
-from scraper import startup_event_scrape, CustomScraper
+from scraper import CustomScraper
 import logging
 from database import create_tables, get_db
 from fastapi import Depends
@@ -15,6 +15,7 @@ from typing import List
 from redis_cache import RedisCache
 import os
 from playwright_setup import PlaywrightSetup
+from fastapi_cprofile.profiler import CProfileMiddleware
 
 URL_TO_SCRAP = os.getenv("URL_TO_SCRAP")
 # Create a custom logger
@@ -24,6 +25,9 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 
 app = FastAPI()
+
+app.add_middleware(CProfileMiddleware, enable=True, server_app=app,
+                   filename='./output.pstats', strip_dirs=False, sort_by='cumulative')
 
 
 @app.get("/tools", response_model=List[ToolResponse])

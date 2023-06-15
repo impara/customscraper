@@ -40,13 +40,6 @@ class ToolResponse(BaseModel):
     additional_info: str
     final_url: str
 
-    @validator("final_url")
-    def validate_url(cls, value):
-        if not value.startswith("https://"):
-            raise ValueError(
-                "Invalid URL format. URL must start with 'https://'.")
-        return value
-
 
 class ToolCreate(BaseModel):
     name: constr(max_length=255)

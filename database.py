@@ -4,7 +4,8 @@ from model import Base
 import logging
 import os
 
-DATABASE_URL = os.getenv("DATABASE_URL")
+# Use os.environ instead of os.getenv
+DATABASE_URL = os.environ["DATABASE_URL"]
 
 # Define the engine globally
 engine = create_async_engine(DATABASE_URL, future=True)
@@ -19,11 +20,10 @@ async def get_db():
     try:
         yield session
     finally:
-        await session.close()
+        await session.close()  # Close the session as soon as you're done with it
 
 
 async def create_tables():
-    # Define the engine variable outside the try block with a default value
     try:
         # Create the tables
         async with engine.begin() as conn:
@@ -33,4 +33,4 @@ async def create_tables():
     except Exception as e:
         logging.error(
             "Database connection failed for create_async_engine. Error: %s", str(e))
-        raise
+        # Don't re-raise the exception
