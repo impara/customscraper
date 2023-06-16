@@ -192,10 +192,12 @@ class CustomScraper(PlaywrightSetup):
 
                 # If the current URLs are all in the set of all URLs, break the loop
                 current_urls = set([await element.get_attribute('href') for element in new_tool_elements])
-                if current_urls.issubset(self.all_urls):
+                new_urls = current_urls.difference(self.all_urls)
+                if not new_urls:
                     break
                 else:
-                    self.all_urls.update(current_urls)
+                    self.all_urls.update(new_urls)
+                    logging.info(f"Number of new URLs found: {len(new_urls)}")
 
         else:
             # Log if the initial elements were found
@@ -242,16 +244,19 @@ class CustomScraper(PlaywrightSetup):
 
                         # Add the URL to the set of processed URLs
                         processed_urls.add(tool_url)
+                        logging.info(
+                            f"Total URLs processed: {len(self.all_urls)}")
                         tools_scraped += 1
                         # Log processed urls
                         logging.info(
-                            f"Tool url processed: {tool_url}, total processed: {len(processed_urls)}")
+                            f"Total tools scraped: {len(processed_urls)}")
                 await asyncio.gather(*tasks)
-            await self.session.commit()  # commit once after all tasks are done
             logging.info("Changes committed successfully.")
         except Exception as e:
             logging.error(f"Error during scraping: {str(e)}")
         finally:
+            await self.session.commit()  # commit once after all tasks are done
+            logging.info("Changes committed successfully.")
             await self.upsert_tool_data_to_redis()
 
     async def process_tool_url(self, tool_url, tool_data_dict):
