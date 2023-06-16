@@ -14,7 +14,7 @@ class RedisCache:
         value = await self.redis_pool.get(key)
         return json.loads(value) if value else None
 
-    async def set_to_redis(self, key, value, expire=60 * 60 * 24):
+    async def set_to_redis(self, key, value, expire=None):
         await self.redis_pool.set(key, json.dumps(value), ex=expire)
 
     async def mget(self, *keys):

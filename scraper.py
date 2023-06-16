@@ -152,6 +152,9 @@ class CustomScraper(PlaywrightSetup):
         tool_elements = await self.page.query_selector_all("div.tool-item-text-link-block---new a.tool-item-link---new")
         num_tool_elements = len(tool_elements)
 
+        # Add this logging
+        logging.info(f"Initial tool links found: {num_tool_elements}")
+
         # If there are no tool elements, start scrolling
         if not tool_elements:
             last_key = await self.redis_cache.get_last_key()
@@ -195,14 +198,23 @@ class CustomScraper(PlaywrightSetup):
                 else:
                     await asyncio.sleep(1)  # Wait a bit before checking again
 
-        # Log the number of links found
-        logging.info(f"Number of tool links found: {len(tool_elements)}")
+                # Log the number of new tool links found
+                # Move the log inside the loop
+                logging.info(
+                    f"Number of new tool links found: {len(new_tool_elements)}")
+
+        else:
+            # Log if the initial elements were found
+            logging.info("Tool elements found without scrolling.")
 
         # Fetch all href attributes at once
         hrefs = await asyncio.gather(*[self.safe_get_attribute(element, "href") for element in tool_elements])
 
         # Join the base URL with each href
         tool_urls = [urljoin(self.base_url, href) for href in hrefs]
+        # Log the tool URLs
+        for url in tool_urls:
+            logging.info(f"Tool URL: {url}")
 
         return tool_urls[:self.scrape_limit]
 
@@ -212,7 +224,11 @@ class CustomScraper(PlaywrightSetup):
             tools_scraped = 0
             processed_urls = set()  # Keep track of processed URLs
             while tools_scraped < self.scrape_limit:
+                # Log the current number of tools scraped
+                logging.info(f"Current tools scraped: {tools_scraped}")
                 tool_urls = await self.extract_links()
+                # Log the number of extracted tool urls
+                logging.info(f"Extracted links count: {len(tool_urls)}")
                 tool_data_dict = await self.get_tool_data_from_redis(tool_urls)
                 tasks = []
                 for tool_url in tool_urls:
@@ -228,11 +244,14 @@ class CustomScraper(PlaywrightSetup):
                         # Add the URL to the set of processed URLs
                         processed_urls.add(tool_url)
                         tools_scraped += 1
+                        # Log processed urls
+                        logging.info(
+                            f"Tool url processed: {tool_url}, total processed: {len(processed_urls)}")
                 await asyncio.gather(*tasks)
             await self.session.commit()  # commit once after all tasks are done
             logging.info("Changes committed successfully.")
         except Exception as e:
-            logging.error("Error during scraping:", str(e))
+            logging.error(f"Error during scraping: {str(e)}")
         finally:
             await self.upsert_tool_data_to_redis()
 
@@ -270,7 +289,7 @@ class CustomScraper(PlaywrightSetup):
                 'final_url': tool.final_url,
                 'url': tool.url,
             }
-            await self.redis_cache.set_to_redis(tool.url, tool_data, 86400)
+            await self.redis_cache.set_to_redis(tool.url, tool_data, None)
 
     async def process_tool_data(self, tool_data, tool_url):
         # Check the cache first
