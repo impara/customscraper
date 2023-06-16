@@ -15,7 +15,7 @@ from typing import List
 from redis_cache import RedisCache
 import os
 from playwright_setup import PlaywrightSetup
-from fastapi_cprofile.profiler import CProfileMiddleware
+# from fastapi_cprofile.profiler import CProfileMiddleware
 
 URL_TO_SCRAP = os.getenv("URL_TO_SCRAP")
 # Create a custom logger
