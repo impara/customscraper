@@ -26,8 +26,7 @@ logging.basicConfig(
 
 app = FastAPI()
 
-app.add_middleware(CProfileMiddleware, enable=True, server_app=app,
-                   filename='./output.pstats', strip_dirs=False, sort_by='cumulative')
+# app.add_middleware(CProfileMiddleware, enable=True, server_app=app, filename='./output.pstats', strip_dirs=False, sort_by='cumulative')
 
 
 @app.get("/tools", response_model=List[ToolResponse])
