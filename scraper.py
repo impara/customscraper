@@ -265,12 +265,17 @@ class CustomScraper(PlaywrightSetup):
                 logging.info(
                     f"Tool data for {tool_url} already exists in the cache. Skipping.")
                 return
-            tool_data = await self.extract_tool_data(tool_url)
-            if tool_data is None:
-                logging.warning(
-                    f"Failed to extract data from {tool_url}. Skipping this tool.")
-                return
-            await self.process_tool_data(tool_data, tool_url)
+            try:
+                tool_data = await self.extract_tool_data(tool_url)
+                if tool_data is None:
+                    logging.warning(
+                        f"Failed to extract data from {tool_url}. Skipping this tool.")
+                    return
+                await self.process_tool_data(tool_data, tool_url)
+            except Exception as e:
+                logging.error(f"Error during scraping {tool_url}: {str(e)}")
+                # Remove the URL from all_urls if an error occurs
+                self.all_urls.remove(tool_url)
 
     async def upsert_tool_data_to_redis(self):
         # Fetch all tool keys from Redis at once
