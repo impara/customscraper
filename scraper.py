@@ -56,6 +56,7 @@ class CustomScraper(PlaywrightSetup):
         self.page = page
         self.browser = browser
         self.lock = asyncio.Lock()
+        self.all_urls = set()
 
     async def initialize(self):
         self.page = await self.setup()
@@ -156,56 +157,45 @@ class CustomScraper(PlaywrightSetup):
         logging.info(f"Initial tool links found: {num_tool_elements}")
 
         # If there are no tool elements, start scrolling
-        if not tool_elements:
-            last_key = await self.redis_cache.get_last_key()
-            last_key_found = False
+    async def extract_links(self):
+        try:
+            # Wait for the page to load
+            await self.page.wait_for_load_state("networkidle")
+        except Exception:
+            logging.warning(
+                "TimeoutException occurred while waiting for elements. Skipping this page.")
+            return []
 
-            # Start observing for intersection changes before scrolling
-            try:
-                await self.page.evaluate("""
-                    // Define a function to scroll the page when the last element becomes visible
-                    function scroll_when_visible(target) {
-                        const observer = new IntersectionObserver((entries, observer) => {
-                            entries.forEach(entry => {
-                                if (entry.isIntersecting) {
-                                    window.scrollBy(0, window.innerHeight);
-                                    observer.unobserve(target);
-                                }
-                            });
-                        });
-                        observer.observe(target);
-                    }
+        tool_elements = await self.page.query_selector_all("div.tool-item-text-link-block---new a.tool-item-link---new")
+        num_tool_elements = len(tool_elements)
 
-                    // Get the last tool element
-                    const tool_elements = document.querySelectorAll("div.tool-item-text-link-block---new a.tool-item-link---new");
-                    const last_tool_element = tool_elements[tool_elements.length - 1];
-                    scroll_when_visible(last_tool_element);
-                """)
-            except Exception as e:
-                logging.error(f"Error during scrolling: {str(e)}")
-                return []
+        # Add this logging
+        logging.info(f"Initial tool links found: {num_tool_elements}")
 
+        # If the number of tool elements is less than the scrape limit, start scrolling
+        if num_tool_elements < self.scrape_limit:
             # Wait for new tool elements to appear
             while True:
+                # Scroll down
+                await self.page.keyboard.press('PageDown')
+                await asyncio.sleep(3)  # Wait a bit before checking again
+
                 new_tool_elements = await self.page.query_selector_all("div.tool-item-text-link-block---new a.tool-item-link---new")
                 if len(new_tool_elements) > num_tool_elements:
                     num_tool_elements = len(new_tool_elements)
-                    # Check if the last key is in the new tool elements
-                    for element in new_tool_elements:
-                        href = await self.safe_get_attribute(element, "href")
-                        tool_url = urljoin(self.base_url, href)
-                        if tool_url == last_key:
-                            last_key_found = True
-                            break
-                    if last_key_found:
-                        break
                 else:
-                    await asyncio.sleep(1)  # Wait a bit before checking again
+                    break  # Break the loop if no new elements are found
 
                 # Log the number of new tool links found
-                # Move the log inside the loop
                 logging.info(
                     f"Number of new tool links found: {len(new_tool_elements)}")
+
+                # If the current URLs are all in the set of all URLs, break the loop
+                current_urls = set([await element.get_attribute('href') for element in new_tool_elements])
+                if current_urls.issubset(self.all_urls):
+                    break
+                else:
+                    self.all_urls.update(current_urls)
 
         else:
             # Log if the initial elements were found
@@ -227,16 +217,15 @@ class CustomScraper(PlaywrightSetup):
             await self.page.goto(self.base_url)
             tools_scraped = 0
             processed_urls = set()  # Keep track of processed URLs
-            previous_urls = set()  # Keep track of previous URLs
             while tools_scraped < self.scrape_limit:
                 # Log the current number of tools scraped
                 logging.info(f"Current tools scraped: {tools_scraped}")
                 tool_urls = await self.extract_links()
-                # If the current URLs are the same as the previous URLs, break the loop
-                if set(tool_urls) == previous_urls:
-                    logging.info("Same URLs detected. Stopping scraping.")
+                # If the current URLs are all in the set of all URLs, break the loop
+                if set(tool_urls).issubset(self.all_urls):
+                    logging.info(
+                        "All URLs have been seen before. Stopping scraping.")
                     break
-                previous_urls = set(tool_urls)  # Update the previous URLs
                 # Log the number of extracted tool urls
                 logging.info(f"Extracted links count: {len(tool_urls)}")
                 tool_data_dict = await self.get_tool_data_from_redis(tool_urls)
