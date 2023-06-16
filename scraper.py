@@ -161,25 +161,29 @@ class CustomScraper(PlaywrightSetup):
             last_key_found = False
 
             # Start observing for intersection changes before scrolling
-            await self.page.evaluate("""
-                // Define a function to scroll the page when the last element becomes visible
-                function scroll_when_visible(target) {
-                    const observer = new IntersectionObserver((entries, observer) => {
-                        entries.forEach(entry => {
-                            if (entry.isIntersecting) {
-                                window.scrollBy(0, window.innerHeight);
-                                observer.unobserve(target);
-                            }
+            try:
+                await self.page.evaluate("""
+                    // Define a function to scroll the page when the last element becomes visible
+                    function scroll_when_visible(target) {
+                        const observer = new IntersectionObserver((entries, observer) => {
+                            entries.forEach(entry => {
+                                if (entry.isIntersecting) {
+                                    window.scrollBy(0, window.innerHeight);
+                                    observer.unobserve(target);
+                                }
+                            });
                         });
-                    });
-                    observer.observe(target);
-                }
+                        observer.observe(target);
+                    }
 
-                // Get the last tool element
-                const tool_elements = document.querySelectorAll("div.tool-item-text-link-block---new a.tool-item-link---new");
-                const last_tool_element = tool_elements[tool_elements.length - 1];
-                scroll_when_visible(last_tool_element);
-            """)
+                    // Get the last tool element
+                    const tool_elements = document.querySelectorAll("div.tool-item-text-link-block---new a.tool-item-link---new");
+                    const last_tool_element = tool_elements[tool_elements.length - 1];
+                    scroll_when_visible(last_tool_element);
+                """)
+            except Exception as e:
+                logging.error(f"Error during scrolling: {str(e)}")
+                return []
 
             # Wait for new tool elements to appear
             while True:
@@ -223,10 +227,16 @@ class CustomScraper(PlaywrightSetup):
             await self.page.goto(self.base_url)
             tools_scraped = 0
             processed_urls = set()  # Keep track of processed URLs
+            previous_urls = set()  # Keep track of previous URLs
             while tools_scraped < self.scrape_limit:
                 # Log the current number of tools scraped
                 logging.info(f"Current tools scraped: {tools_scraped}")
                 tool_urls = await self.extract_links()
+                # If the current URLs are the same as the previous URLs, break the loop
+                if set(tool_urls) == previous_urls:
+                    logging.info("Same URLs detected. Stopping scraping.")
+                    break
+                previous_urls = set(tool_urls)  # Update the previous URLs
                 # Log the number of extracted tool urls
                 logging.info(f"Extracted links count: {len(tool_urls)}")
                 tool_data_dict = await self.get_tool_data_from_redis(tool_urls)
