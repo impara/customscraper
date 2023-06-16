@@ -85,7 +85,7 @@ class CustomScraper(PlaywrightSetup):
             try:
                 # Navigate to the tool URL
                 # Wait for up to 60 seconds
-                await self.page.goto(tool_url, timeout=60000)
+                await self.page.goto(tool_url, timeout=30000)
                 break  # If the navigation succeeds, break out of the loop
             except Exception as e:
                 if 'net::ERR_ABORTED' in str(e):
@@ -121,7 +121,7 @@ class CustomScraper(PlaywrightSetup):
         for attempt in range(max_retries):
             try:
                 new_page = await self.browser.new_page()
-                await new_page.goto(url)
+                await new_page.goto(url, wait_until="domcontentloaded", timeout=60000)
                 await new_page.wait_for_load_state("networkidle")
                 final_url = new_page.url
                 await new_page.close()  # Close the page after fetching the URL
