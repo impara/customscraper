@@ -1,4 +1,3 @@
-import json
 import asyncio
 import logging
 from datetime import datetime
@@ -11,7 +10,6 @@ from playwright_setup import PlaywrightSetup
 from model import ToolTable
 from database import async_session
 from utils import create_async_db_connection
-from model import ToolTable
 
 logging.basicConfig(level=logging.INFO)
 
@@ -40,8 +38,6 @@ async def startup_event_scrape(scrape_limit, scraper):
 
     except StatementError as e:
         logger.error("Error during startup event: %s", e)
-        raise
-
     finally:
         # After you're done with your scraping logic, close the browser and stop the Playwright process
         await playwright_setup.teardown()
@@ -84,14 +80,12 @@ class CustomScraper(PlaywrightSetup):
         for _ in range(3):  # Try up to 3 times
             try:
                 # Navigate to the tool URL
-                # Wait for up to 60 seconds
-                await self.page.goto(tool_url, timeout=30000)
+                await self.page.goto(tool_url, wait_until="domcontentloaded", timeout=120000)
                 break  # If the navigation succeeds, break out of the loop
             except Exception as e:
                 if 'net::ERR_ABORTED' in str(e):
-                    logging.error(
+                    logger.error(
                         f"Navigation aborted for {tool_url}, retrying...")
-                    await asyncio.sleep(1)  # Wait for a bit before retrying
                 else:
                     raise  # If it's a different error, re-raise it
         try:
@@ -101,7 +95,8 @@ class CustomScraper(PlaywrightSetup):
             description = await self.safe_inner_text("div.rich-text-block.w-richtext")
             additional_info = await self.safe_inner_text("div.text-block-18")
             # Extract redirected tool elements
-            final_url = await self.safe_get_attribute(await self.page.query_selector("div.div-block-6 > a"), "href")
+            final_url_element = await self.page.query_selector("div.div-block-6 > a")
+            final_url = await self.safe_get_attribute(final_url_element, "href")
 
             # Return tool data as a dictionary
             return {
@@ -113,7 +108,7 @@ class CustomScraper(PlaywrightSetup):
                 'url': tool_url,
             }
         except Exception as e:
-            logging.error(
+            logger.error(
                 f"Unexpected error extracting data from {tool_url}: {str(e)}")
             return None
 
@@ -127,7 +122,7 @@ class CustomScraper(PlaywrightSetup):
                 await new_page.close()  # Close the page after fetching the URL
                 return final_url
             except Exception as e:
-                logging.error(f'Error occurred when fetching URL {url}: {e}')
+                logger.error(f'Error occurred when fetching URL {url}: {e}')
                 if attempt < max_retries - 1:
                     await asyncio.sleep(3 ** attempt)  # Exponential backoff
                     continue
@@ -136,81 +131,67 @@ class CustomScraper(PlaywrightSetup):
 
     async def get_tool_data_from_redis(self, tool_urls):
         # Create a dictionary with the tool URLs as keys and a boolean value indicating whether the URL exists in Redis
-        tool_data_dict = {
-            tool_url: await self.redis_cache.exists(tool_url) for tool_url in tool_urls}
+        tool_data_dict = {}
+        for tool_url in tool_urls:
+            try:
+                exists = await self.redis_cache.exists(tool_url)
+                tool_data_dict[tool_url] = exists
+            except Exception as e:
+                logger.error(f"Error during Redis cache operation: {str(e)}")
+                # Handle the error appropriately (e.g., retry, skip, etc.)
+                # Set exists to False for error cases
+                tool_data_dict[tool_url] = False
 
         return tool_data_dict
 
     async def extract_links(self):
+        tool_urls = []
+
         try:
-            # Wait for the page to load
             await self.page.wait_for_load_state("networkidle")
         except Exception:
-            logging.warning(
+            logger.warning(
                 "TimeoutException occurred while waiting for elements. Skipping this page.")
-            return []
+            return tool_urls
 
         tool_elements = await self.page.query_selector_all("div.tool-item-text-link-block---new a.tool-item-link---new")
         num_tool_elements = len(tool_elements)
+        logger.info(f"Initial tool links found: {num_tool_elements}")
 
-        # Add this logging
-        logging.info(f"Initial tool links found: {num_tool_elements}")
-
-        # If there are no tool elements, start scrolling
-    async def extract_links(self):
-        try:
-            # Wait for the page to load
-            await self.page.wait_for_load_state("networkidle")
-        except Exception:
-            logging.warning(
-                "TimeoutException occurred while waiting for elements. Skipping this page.")
-            return []
-
-        tool_elements = await self.page.query_selector_all("div.tool-item-text-link-block---new a.tool-item-link---new")
-        num_tool_elements = len(tool_elements)
-
-        # Add this logging
-        logging.info(f"Initial tool links found: {num_tool_elements}")
-
-        # If the number of tool elements is less than the scrape limit, start scrolling
         if num_tool_elements < self.scrape_limit:
-            # Wait for new tool elements to appear
             while True:
-                # Scroll down
-                await self.page.keyboard.press('PageDown')
-                await asyncio.sleep(3)  # Wait a bit before checking again
+                await self.page.evaluate('window.scrollTo(0, document.body.scrollHeight)')
+
+                # Pause here to allow for new content to load
+                await asyncio.sleep(2)  # 2 seconds pause
 
                 new_tool_elements = await self.page.query_selector_all("div.tool-item-text-link-block---new a.tool-item-link---new")
                 if len(new_tool_elements) > num_tool_elements:
                     num_tool_elements = len(new_tool_elements)
                 else:
-                    break  # Break the loop if no new elements are found
+                    break
 
-                # Log the number of new tool links found
-                logging.info(
+                logger.info(
                     f"Number of new tool links found: {len(new_tool_elements)}")
-
-                # If the current URLs are all in the set of all URLs, break the loop
                 current_urls = set([await element.get_attribute('href') for element in new_tool_elements])
                 new_urls = current_urls.difference(self.all_urls)
                 if not new_urls:
                     break
                 else:
                     self.all_urls.update(new_urls)
-                    logging.info(f"Number of new URLs found: {len(new_urls)}")
+                    logger.info(f"Number of new URLs found: {len(new_urls)}")
 
+                if len(self.all_urls) >= self.scrape_limit:
+                    break
         else:
-            # Log if the initial elements were found
-            logging.info("Tool elements found without scrolling.")
+            logger.info("Tool elements found without scrolling.")
 
-        # Fetch all href attributes at once
         hrefs = await asyncio.gather(*[self.safe_get_attribute(element, "href") for element in tool_elements])
-
-        # Join the base URL with each href
         tool_urls = [urljoin(self.base_url, href) for href in hrefs]
-        # Log the tool URLs
+        self.all_urls.update(tool_urls)
+
         for url in tool_urls:
-            logging.info(f"Tool URL: {url}")
+            logger.info(f"Tool URL: {url}")
 
         return tool_urls[:self.scrape_limit]
 
@@ -218,64 +199,56 @@ class CustomScraper(PlaywrightSetup):
         try:
             await self.page.goto(self.base_url)
             tools_scraped = 0
-            processed_urls = set()  # Keep track of processed URLs
             while tools_scraped < self.scrape_limit:
                 # Log the current number of tools scraped
-                logging.info(f"Current tools scraped: {tools_scraped}")
+                logger.info(f"Current tools scraped: {tools_scraped}")
                 tool_urls = await self.extract_links()
-                # If the current URLs are all in the set of all URLs, break the loop
-                if set(tool_urls).issubset(self.all_urls):
-                    logging.info(
-                        "All URLs have been seen before. Stopping scraping.")
-                    break
-                # Log the number of extracted tool urls
-                logging.info(f"Extracted links count: {len(tool_urls)}")
+                # Log the number of extracted tool URLs
+                logger.info(f"Extracted links count: {len(tool_urls)}")
                 tool_data_dict = await self.get_tool_data_from_redis(tool_urls)
                 tasks = []
                 for tool_url in tool_urls:
-                    if tool_url not in processed_urls and tools_scraped < self.scrape_limit:
-                        if tool_data_dict.get(tool_url):
-                            logging.info(
-                                f"Tool data for {tool_url} already exists in the cache. Skipping.")
-                            continue
-                        # pass the session here
-                        tasks.append(self.process_tool_url(
-                            tool_url, tool_data_dict))
-
-                        # Add the URL to the set of processed URLs
-                        processed_urls.add(tool_url)
-                        logging.info(
-                            f"Total URLs processed: {len(self.all_urls)}")
+                    if not tool_data_dict.get(tool_url) and tools_scraped < self.scrape_limit:
+                        tasks.append(self.process_tool_url(tool_url))
                         tools_scraped += 1
-                        # Log processed urls
-                        logging.info(
-                            f"Total tools scraped: {len(processed_urls)}")
+                        # Log processed URLs
+                        logger.info(f"Total tools scraped: {tools_scraped}")
+
+                # If all URLs were in cache, break out of the loop
+                if len(tasks) == 0:
+                    logger.info(
+                        "All URLs already exist in cache. Breaking out of the loop.")
+                    break
+
                 await asyncio.gather(*tasks)
-            logging.info("Changes committed successfully.")
+
+            logger.info("Changes committed successfully.")
         except Exception as e:
-            logging.error(f"Error during scraping: {str(e)}")
+            logger.error(f"Error during scraping: {str(e)}")
         finally:
-            await self.session.commit()  # commit once after all tasks are done
-            logging.info("Changes committed successfully.")
             await self.upsert_tool_data_to_redis()
 
-    async def process_tool_url(self, tool_url, tool_data_dict):
-        async with self.lock:  # Add this line
-            if tool_data_dict.get(tool_url):
-                logging.info(
-                    f"Tool data for {tool_url} already exists in the cache. Skipping.")
-                return
+    async def process_tool_url(self, tool_url):
+        async with self.lock:
             try:
                 tool_data = await self.extract_tool_data(tool_url)
                 if tool_data is None:
-                    logging.warning(
+                    logger.warning(
                         f"Failed to extract data from {tool_url}. Skipping this tool.")
+                    self.all_urls.remove(tool_url)
                     return
+
+                if tool_data['final_url'] is None:
+                    logger.warning(
+                        f"Failed to fetch final URL for {tool_url}. Skipping this tool.")
+                    self.all_urls.remove(tool_url)
+                    return
+
                 await self.process_tool_data(tool_data, tool_url)
             except Exception as e:
-                logging.error(f"Error during scraping {tool_url}: {str(e)}")
-                # Remove the URL from all_urls if an error occurs
+                logger.error(f"Error during scraping {tool_url}: {str(e)}")
                 self.all_urls.remove(tool_url)
+                return None  # Explicitly return None for error cases
 
     async def upsert_tool_data_to_redis(self):
         # Fetch all tool keys from Redis at once
@@ -304,18 +277,18 @@ class CustomScraper(PlaywrightSetup):
         # Check the cache first
         cached_tool_data = await self.redis_cache.get_from_redis(tool_url)
         if cached_tool_data:
-            logging.info(
+            logger.info(
                 f"Tool data for {tool_url} already exists in the cache. Skipping.")
             return
-        logging.info(f"Scraped tool: {tool_data['name']}")
-        logging.info(f"Pricing Model: {tool_data['pricing_model']}")
-        logging.info(f"Description: {tool_data['description']}")
-        logging.info(f"Additional Info: {tool_data['additional_info']}")
-        logging.info(f"Final url: {tool_data['final_url']}")
+        logger.info(f"Scraped tool: {tool_data['name']}")
+        logger.info(f"Pricing Model: {tool_data['pricing_model']}")
+        logger.info(f"Description: {tool_data['description']}")
+        logger.info(f"Additional Info: {tool_data['additional_info']}")
+        logger.info(f"Final url: {tool_data['final_url']}")
 
         fetch_url = await self.fetch(tool_data['final_url'])
         if not fetch_url:
-            logging.warning("Could not fetch URL {} after multiple retries or URL is not valid. Skipping...".format(
+            logger.warning("Could not fetch URL {} after multiple retries or URL is not valid. Skipping...".format(
                 tool_data['final_url']))
             return
 
@@ -323,7 +296,7 @@ class CustomScraper(PlaywrightSetup):
         if parsed_url.scheme and parsed_url.netloc:
             clean_url = parsed_url.scheme + "://" + parsed_url.netloc
         else:
-            logging.warning(
+            logger.warning(
                 "The fetched URL {} could not be parsed correctly.".format(fetch_url))
             return
 
@@ -341,11 +314,11 @@ class CustomScraper(PlaywrightSetup):
 
         try:
             await self.session.commit()  # Use the session attribute of the class
-            logging.info(
+            logger.info(
                 f"Changes committed successfully. Added tool to session: {tool.name}.")
         except IntegrityError:
-            logging.warning(
+            logger.warning(
                 f"Tool {tool.name} already exists in the database. Skipping.")
             await self.session.rollback()  # Roll back the session
         except Exception as e:
-            logging.error("Error committing changes to the database:", str(e))
+            logger.error("Error committing changes to the database:", str(e))
