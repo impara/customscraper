@@ -158,8 +158,14 @@ class CustomScraper(PlaywrightSetup):
         num_tool_elements = len(tool_elements)
         logger.info(f"Initial tool links found: {num_tool_elements}")
 
+        max_iterations = 100  # adjust this value as needed
+        iterations = 0
+
         if num_tool_elements < self.scrape_limit:
             while True:
+                if iterations >= max_iterations:
+                    logger.info("Reached maximum number of iterations.")
+                    break
                 await self.page.evaluate('window.scrollTo(0, document.body.scrollHeight)')
 
                 # Pause here to allow for new content to load
@@ -183,6 +189,7 @@ class CustomScraper(PlaywrightSetup):
 
                 if len(self.all_urls) >= self.scrape_limit:
                     break
+                iterations += 1
         else:
             logger.info("Tool elements found without scrolling.")
 
@@ -202,7 +209,16 @@ class CustomScraper(PlaywrightSetup):
             while tools_scraped < self.scrape_limit:
                 # Log the current number of tools scraped
                 logger.info(f"Current tools scraped: {tools_scraped}")
+
+                # save a copy of all_urls before extraction
+                previous_all_urls = set(self.all_urls)
                 tool_urls = await self.extract_links()
+
+                # Exit condition if no new URLs are found after extraction
+                if previous_all_urls == self.all_urls:
+                    logger.info("No new URLs found. Exiting...")
+                    break
+
                 # Log the number of extracted tool URLs
                 logger.info(f"Extracted links count: {len(tool_urls)}")
                 tool_data_dict = await self.get_tool_data_from_redis(tool_urls)
@@ -210,17 +226,25 @@ class CustomScraper(PlaywrightSetup):
                 for tool_url in tool_urls:
                     if not tool_data_dict.get(tool_url) and tools_scraped < self.scrape_limit:
                         tasks.append(self.process_tool_url(tool_url))
+                        # Increase the count of tools_scraped regardless of the outcome of processing the URL
                         tools_scraped += 1
                         # Log processed URLs
                         logger.info(f"Total tools scraped: {tools_scraped}")
 
-                # If all URLs were in cache, break out of the loop
-                if len(tasks) == 0:
-                    logger.info(
-                        "All URLs already exist in cache. Breaking out of the loop.")
-                    break
+                result = await asyncio.gather(*tasks, return_exceptions=True)
+                failed_urls = [url for url, res in zip(
+                    tool_urls, result) if isinstance(res, Exception)]
+                successful_scrapes = len(
+                    [res for res in result if not isinstance(res, Exception)])
+                tools_scraped += successful_scrapes
+                logger.info(f"Total tools scraped: {tools_scraped}")
 
-                await asyncio.gather(*tasks)
+                # Retry failed URLs, if any
+                if failed_urls:
+                    logger.warning(f"Retrying failed URLs: {failed_urls}")
+                    retry_tasks = [self.process_tool_url(
+                        url) for url in failed_urls]
+                    await asyncio.gather(*retry_tasks)
 
             logger.info("Changes committed successfully.")
         except Exception as e:
@@ -236,7 +260,7 @@ class CustomScraper(PlaywrightSetup):
                     logger.warning(
                         f"Failed to extract data from {tool_url}. Skipping this tool.")
                     self.all_urls.remove(tool_url)
-                    return
+                    return tool_url
 
                 if tool_data['final_url'] is None:
                     logger.warning(
