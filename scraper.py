@@ -340,6 +340,7 @@ class CustomScraper(PlaywrightSetup):
             logger.info(
                 f"Changes committed successfully. Added tool to session: {tool.name}.")
         except IntegrityError:
+            logger.error(f"IntegrityError: {e}")
             logger.warning(
                 f"Tool {tool.name} already exists in the database. Skipping.")
             await self.session.rollback()  # Roll back the session
