@@ -309,7 +309,7 @@ class CustomScraper(PlaywrightSetup):
         logger.info(f"Additional Info: {tool_data['additional_info']}")
         logger.info(f"Final url: {tool_data['final_url']}")
 
-        fetch_url = await self.fetch(tool_data['final_url'])
+        fetch_url = await self.fetch(tool_data['final_url'].rstrip('/'))
         if not fetch_url:
             logger.warning("Could not fetch URL {} after multiple retries or URL is not valid. Skipping...".format(
                 tool_data['final_url']))
