@@ -313,7 +313,7 @@ class CustomScraper(PlaywrightSetup):
         if not fetch_url:
             logger.warning("Could not fetch URL {} after multiple retries or URL is not valid. Skipping...".format(
                 tool_data['final_url']))
-            return
+            fetch_url = tool_data['final_url']
 
         parsed_url = urlparse(fetch_url)
         if parsed_url.scheme and parsed_url.netloc:
