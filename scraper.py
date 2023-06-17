@@ -116,8 +116,7 @@ class CustomScraper(PlaywrightSetup):
         for attempt in range(max_retries):
             try:
                 new_page = await self.browser.new_page()
-                await new_page.goto(url, wait_until="domcontentloaded", timeout=60000)
-                await new_page.wait_for_load_state("networkidle")
+                await new_page.goto(url, wait_until="networkidle", timeout=60000)
                 final_url = new_page.url
                 await new_page.close()  # Close the page after fetching the URL
                 return final_url
