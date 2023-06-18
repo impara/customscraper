@@ -129,17 +129,15 @@ class CustomScraper(PlaywrightSetup):
                     return None  # Return None after all retries have failed
 
     async def get_tool_data_from_redis(self, tool_urls):
-        # Create a dictionary with the tool URLs as keys and a boolean value indicating whether the URL exists in Redis
-        tool_data_dict = {}
-        for tool_url in tool_urls:
-            try:
-                exists = await self.redis_cache.exists(tool_url)
-                tool_data_dict[tool_url] = exists
-            except Exception as e:
-                logger.error(f"Error during Redis cache operation: {str(e)}")
-                # Handle the error appropriately (e.g., retry, skip, etc.)
-                # Set exists to False for error cases
-                tool_data_dict[tool_url] = False
+        # Collect all the Redis cache keys
+        cache_keys = [tool_url for tool_url in tool_urls]
+
+        # Retrieve the tool data for all cache keys in a single call
+        tool_data_list = await self.redis_cache.mget(*cache_keys)
+
+        # Create a dictionary with the tool URLs as keys and the existence status as values
+        tool_data_dict = {tool_url: tool_data is not None for tool_url,
+                          tool_data in zip(tool_urls, tool_data_list)}
 
         return tool_data_dict
 
@@ -254,19 +252,33 @@ class CustomScraper(PlaywrightSetup):
     async def process_tool_url(self, tool_url):
         async with self.lock:
             try:
-                tool_data = await self.extract_tool_data(tool_url)
+                # Fetch the tool URL concurrently
+                fetch_task = asyncio.create_task(
+                    self.fetch(tool_url.rstrip('/')))
+
+                # Extract tool data while waiting for the URL to be fetched
+                tool_data_task = asyncio.create_task(
+                    self.extract_tool_data(tool_url))
+
+                # Wait for both tasks to complete
+                tool_data = await tool_data_task
+                final_url = await fetch_task
+
+                # Check if tool data extraction was successful
                 if tool_data is None:
                     logger.warning(
                         f"Failed to extract data from {tool_url}. Skipping this tool.")
                     self.all_urls.remove(tool_url)
                     return tool_url
 
-                if tool_data['final_url'] is None:
+                # Check if fetching the final URL was successful
+                if final_url is None:
                     logger.warning(
-                        f"Failed to fetch final URL for {tool_url}. Skipping this tool.")
+                        f"Failed to fetch the final URL for {tool_url}. Skipping this tool.")
                     self.all_urls.remove(tool_url)
                     return
 
+                # Process the tool data
                 await self.process_tool_data(tool_data, tool_url)
             except Exception as e:
                 logger.error(f"Error during scraping {tool_url}: {str(e)}")
