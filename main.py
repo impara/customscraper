@@ -1,14 +1,13 @@
 from typing import Optional
 import uvicorn
-from fastapi import FastAPI
+from fastapi import FastAPI, Query, Depends
+from fastapi import HTTPException
 from scraper import CustomScraper
 import logging
 from database import create_tables, get_db
-from fastapi import Depends
-from sqlalchemy import select, func
+from sqlalchemy import select, text, func
 from sqlalchemy.exc import SQLAlchemyError
 from typing import List
-from fastapi import HTTPException
 from model import ToolTable, ToolResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import List
@@ -31,10 +30,28 @@ app = FastAPI()
 
 @app.get("/tools", response_model=List[ToolResponse])
 async def get_tools(
-    skip: int = 0, limit: int = 10, additional_info: str = None, pricing_model: str = None, db: AsyncSession = Depends(get_db), redis_cache: RedisCache = Depends(RedisCache)
+    skip: int = Query(
+        0, description="Number of records to skip for pagination"),
+    limit: int = Query(10, description="Maximum number of records to return"),
+    additional_info: str = Query(
+        None, description="Additional information to filter tools"),
+    pricing_model: str = Query(
+        None, description="Pricing model to filter tools"),
+    search_term: str = Query(None, description="Search term to filter tools"),
+    db: AsyncSession = Depends(get_db),
+    redis_cache: RedisCache = Depends(RedisCache)
 ):
+    """
+    Retrieve a list of tools from the database.
+
+    - **skip**: Number of records to skip for pagination
+    - **limit**: Maximum number of records to return
+    - **additional_info**: Additional information to filter tools
+    - **pricing_model**: Pricing model to filter tools
+    - **search_term**: Search term to filter tools
+    """
     try:
-        cache_key = f"tools:{skip}:{limit}:{additional_info}:{pricing_model}"
+        cache_key = f"tools:{skip}:{limit}:{additional_info}:{pricing_model}:{search_term}"
         tools_data = await redis_cache.get_from_redis(cache_key)
 
         if not tools_data:
@@ -48,6 +65,15 @@ async def get_tools(
                 pricing_model_lower = pricing_model.lower()
                 query = query.where(func.lower(
                     ToolTable.pricing_model) == pricing_model_lower)
+            if search_term:
+                search_term = search_term.replace(
+                    "\\", "\\\\").replace("%", "\\%")
+                query = query.where(
+                    text(
+                        "(to_tsvector('english', name) @@ plainto_tsquery('english', :search)) OR "
+                        "(to_tsvector('english', description) @@ plainto_tsquery('english', :search))"
+                    ).params(search=search_term)
+                )
             result = await db.execute(query)
             tools = result.scalars().all()
             tools_data = [tool.to_dict() for tool in tools]
