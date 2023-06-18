@@ -14,7 +14,7 @@ class ToolTable(Base):
     pricing_model = Column(String, index=True)
     description = Column(String, index=True)
     additional_info = Column(String)
-    final_url = Column(String, unique=True, index=True)
+    final_url = Column(String, index=True)  # Removed unique=True
     url = Column(String, unique=True, index=True)
     last_scraped = Column(DateTime, nullable=False)
 
