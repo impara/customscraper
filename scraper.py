@@ -112,22 +112,30 @@ class CustomScraper(PlaywrightSetup):
                 f"Unexpected error extracting data from {tool_url}: {str(e)}")
             return None
 
-    async def fetch(self, url, max_retries=2):
-        for attempt in range(max_retries):
+    async def fetch(self, url):
+        try:
+            new_page = await self.browser.new_page()
+            await new_page.goto(url, wait_until="load", timeout=60000)
+            await new_page.wait_for_function("document.readyState === 'complete'")
+            final_url = new_page.url
+            await new_page.close()  # Close the page after fetching the URL
+            return final_url
+        except Exception as e:
+            logger.error(
+                f'Error occurred when fetching URL {url} using initial method: {e}')
+
+            # Try 'networkidle' method as a fallback
             try:
                 new_page = await self.browser.new_page()
-                await new_page.goto(url, wait_until="load", timeout=60000)
-                await new_page.wait_for_function("document.readyState === 'complete'")
+                await new_page.goto(url)
+                await new_page.wait_for_load_state('networkidle')
                 final_url = new_page.url
                 await new_page.close()  # Close the page after fetching the URL
                 return final_url
             except Exception as e:
-                logger.error(f'Error occurred when fetching URL {url}: {e}')
-                if attempt < max_retries - 1:
-                    await asyncio.sleep(3 ** attempt)  # Exponential backoff
-                    continue
-                else:
-                    return None  # Return None after all retries have failed
+                logger.error(
+                    f'Error occurred when fetching URL {url} with networkidle method: {e}')
+                return None  # Return None if both methods fail
 
     async def get_tool_data_from_redis(self, tool_urls):
         # Collect all the Redis cache keys
