@@ -117,6 +117,7 @@ class CustomScraper(PlaywrightSetup):
             try:
                 new_page = await self.browser.new_page()
                 await new_page.goto(url, wait_until="load", timeout=60000)
+                await new_page.wait_for_function("document.readyState === 'complete'")
                 final_url = new_page.url
                 await new_page.close()  # Close the page after fetching the URL
                 return final_url
@@ -252,33 +253,19 @@ class CustomScraper(PlaywrightSetup):
     async def process_tool_url(self, tool_url):
         async with self.lock:
             try:
-                # Fetch the tool URL concurrently
-                fetch_task = asyncio.create_task(
-                    self.fetch(tool_url.rstrip('/')))
-
-                # Extract tool data while waiting for the URL to be fetched
-                tool_data_task = asyncio.create_task(
-                    self.extract_tool_data(tool_url))
-
-                # Wait for both tasks to complete
-                tool_data = await tool_data_task
-                final_url = await fetch_task
-
-                # Check if tool data extraction was successful
+                tool_data = await self.extract_tool_data(tool_url)
                 if tool_data is None:
                     logger.warning(
                         f"Failed to extract data from {tool_url}. Skipping this tool.")
                     self.all_urls.remove(tool_url)
                     return tool_url
 
-                # Check if fetching the final URL was successful
-                if final_url is None:
+                if tool_data['final_url'] is None:
                     logger.warning(
-                        f"Failed to fetch the final URL for {tool_url}. Skipping this tool.")
+                        f"Failed to fetch final URL for {tool_url}. Skipping this tool.")
                     self.all_urls.remove(tool_url)
                     return
 
-                # Process the tool data
                 await self.process_tool_data(tool_data, tool_url)
             except Exception as e:
                 logger.error(f"Error during scraping {tool_url}: {str(e)}")
@@ -325,15 +312,11 @@ class CustomScraper(PlaywrightSetup):
         if not fetch_url:
             logger.warning("Could not fetch URL {} after multiple retries or URL is not valid. Skipping...".format(
                 tool_data['final_url']))
-            fetch_url = tool_url
-
-        parsed_url = urlparse(fetch_url)
-        if parsed_url.scheme and parsed_url.netloc:
-            clean_url = parsed_url.scheme + "://" + parsed_url.netloc
+            clean_url = tool_data['final_url']
         else:
-            logger.warning(
-                "The fetched URL {} could not be parsed correctly.".format(fetch_url))
-            return
+            parsed_url = urlparse(fetch_url)
+            if parsed_url.scheme and parsed_url.netloc:
+                clean_url = parsed_url.scheme + "://" + parsed_url.netloc
 
         tool = ToolTable(
             name=tool_data['name'],
