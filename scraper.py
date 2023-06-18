@@ -116,7 +116,7 @@ class CustomScraper(PlaywrightSetup):
         for attempt in range(max_retries):
             try:
                 new_page = await self.browser.new_page()
-                await new_page.goto(url, wait_until="networkidle", timeout=60000)
+                await new_page.goto(url, wait_until="load", timeout=60000)
                 final_url = new_page.url
                 await new_page.close()  # Close the page after fetching the URL
                 return final_url
@@ -325,7 +325,7 @@ class CustomScraper(PlaywrightSetup):
         if not fetch_url:
             logger.warning("Could not fetch URL {} after multiple retries or URL is not valid. Skipping...".format(
                 tool_data['final_url']))
-            fetch_url = tool_data['final_url']
+            fetch_url = tool_url
 
         parsed_url = urlparse(fetch_url)
         if parsed_url.scheme and parsed_url.netloc:
