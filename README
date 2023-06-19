@@ -25,3 +25,5 @@ export DATABASE_URL="postgresql+asyncpg://username:password@localhost/postgres"
 export REDIS_URL="redis://localhost"
 
 export URL_TO_SCRAP="SITE TO SCRAP"
+
+export IP_ADDRESSES="127.0.0.1,..."

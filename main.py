@@ -1,31 +1,37 @@
-from typing import Optional
+from fastapi import FastAPI, Request, HTTPException, Query, Depends
+from fastapi.responses import JSONResponse
+from typing import List
 import uvicorn
-from fastapi import FastAPI, Query, Depends
-from fastapi import HTTPException
-from scraper import CustomScraper
 import logging
+import os
+from scraper import CustomScraper
 from database import create_tables, get_db
 from sqlalchemy import select, text, func
 from sqlalchemy.exc import SQLAlchemyError
-from typing import List
 from model import ToolTable, ToolResponse
 from sqlalchemy.ext.asyncio import AsyncSession
-from typing import List
 from redis_cache import RedisCache
-import os
 from playwright_setup import PlaywrightSetup
-# from fastapi_cprofile.profiler import CProfileMiddleware
 
 URL_TO_SCRAP = os.getenv("URL_TO_SCRAP")
-# Create a custom logger
+IP_ADDRESSES = os.getenv("IP_ADDRESSES")
 logger = logging.getLogger(__name__)
-# Configure logger
+
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 
 app = FastAPI()
 
-# app.add_middleware(CProfileMiddleware, enable=True, server_app=app, filename='./output.pstats', strip_dirs=False, sort_by='cumulative')
+
+@app.middleware("http")
+async def whitelist_middleware(request: Request, call_next):
+    whitelist = IP_ADDRESSES.split(',')
+    client_ip = request.client.host
+    logger.info(f"Received request from IP address: {client_ip}")
+    if not any(client_ip.startswith(ip) for ip in whitelist):
+        logger.warning(f"Blocking request from IP address: {client_ip}")
+        return JSONResponse(status_code=403, content={"detail": "Access denied"})
+    return await call_next(request)
 
 
 @app.get("/tools", response_model=List[ToolResponse])
