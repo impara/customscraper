@@ -1,5 +1,5 @@
 import aioredis
-import json
+import orjson  # Import orjson
 import os
 
 REDIS_URL = os.environ["REDIS_URL"]  # Use os.environ instead of os.getenv
@@ -8,18 +8,20 @@ REDIS_URL = os.environ["REDIS_URL"]  # Use os.environ instead of os.getenv
 class RedisCache:
     def __init__(self):
         # Create the Redis connection in the constructor
-        self.redis_pool = aioredis.from_url(REDIS_URL, encoding="utf-8")
+        self.redis_pool = aioredis.from_url(REDIS_URL)
 
     async def get_from_redis(self, key):
         value = await self.redis_pool.get(key)
-        return json.loads(value) if value else None
+        return orjson.loads(value) if value else None  # Use orjson.loads()
 
     async def set_to_redis(self, key, value, expire=None):
-        await self.redis_pool.set(key, json.dumps(value), ex=expire)
+        # Use orjson.dumps()
+        await self.redis_pool.set(key, orjson.dumps(value), ex=expire)
 
     async def mget(self, *keys):
         values = await self.redis_pool.execute_command('MGET', *keys)
-        return [json.loads(value) if value else None for value in values]
+        # Use orjson.loads()
+        return [orjson.loads(value) if value else None for value in values]
 
     async def get_keys(self, pattern="*"):
         keys = await self.redis_pool.execute_command('KEYS', pattern)

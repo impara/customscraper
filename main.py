@@ -12,6 +12,18 @@ from model import ToolTable, ToolResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from redis_cache import RedisCache
 from playwright_setup import PlaywrightSetup
+from typing import Any
+
+from starlette.responses import Response
+import orjson
+
+
+class ORJSONResponse(JSONResponse):
+    media_type = "application/json"
+
+    def render(self, content: Any) -> bytes:
+        return orjson.dumps(content)
+
 
 URL_TO_SCRAP = os.getenv("URL_TO_SCRAP")
 IP_ADDRESSES = os.getenv("IP_ADDRESSES")
@@ -20,7 +32,7 @@ logger = logging.getLogger(__name__)
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 
-app = FastAPI()
+app = FastAPI(default_response_class=ORJSONResponse)
 
 
 @app.middleware("http")
