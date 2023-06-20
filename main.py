@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Request, HTTPException, Query, Depends
+from fastapi import FastAPI, Request, HTTPException, Query, Depends, BackgroundTasks
 from fastapi.responses import JSONResponse
 from typing import List
 import uvicorn
@@ -13,7 +13,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from redis_cache import RedisCache
 from playwright_setup import PlaywrightSetup
 from typing import Any
-
 from starlette.responses import Response
 import orjson
 
@@ -48,6 +47,7 @@ async def whitelist_middleware(request: Request, call_next):
 
 @app.get("/tools", response_model=List[ToolResponse])
 async def get_tools(
+    background_tasks: BackgroundTasks,
     skip: int = Query(
         0, description="Number of records to skip for pagination"),
     limit: int = Query(10, description="Maximum number of records to return"),
@@ -96,7 +96,8 @@ async def get_tools(
             tools = result.scalars().all()
             tools_data = [tool.to_dict() for tool in tools]
             # Set a key with a TTL (Time To Live) of 24 hours
-            await redis_cache.set_to_redis(cache_key, tools_data, expire=60*60*24)
+            background_tasks.add_task(
+                redis_cache.set_to_redis, cache_key, tools_data, expire=60*60*24)
 
         return tools_data
     except SQLAlchemyError as e:
