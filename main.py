@@ -117,8 +117,7 @@ async def get_additional_info(db: AsyncSession = Depends(get_db), redis_cache: R
         if not additional_info_data:
             query = select(ToolTable.additional_info).distinct()
             result = await db.execute(query)
-            additional_info_data = [
-                row.additional_info for row in result.scalars().all()]
+            additional_info_data = [row for row in result.scalars().all()]
             # Set a key with a TTL (Time To Live) of 24 hours
             await redis_cache.set_to_redis(cache_key, additional_info_data, expire=60*60*24)
 
