@@ -105,6 +105,29 @@ async def get_tools(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.get("/additional_info", response_model=List[str])
+async def get_additional_info(db: AsyncSession = Depends(get_db), redis_cache: RedisCache = Depends(RedisCache)):
+    """
+    Retrieve a list of distinct additional_info values from the database.
+    """
+    try:
+        cache_key = "additional_info"
+        additional_info_data = await redis_cache.get_from_redis(cache_key)
+
+        if not additional_info_data:
+            query = select(ToolTable.additional_info).distinct()
+            result = await db.execute(query)
+            additional_info_data = [
+                row.additional_info for row in result.scalars().all()]
+            # Set a key with a TTL (Time To Live) of 24 hours
+            await redis_cache.set_to_redis(cache_key, additional_info_data, expire=60*60*24)
+
+        return additional_info_data
+    except SQLAlchemyError as e:
+        logging.error("Error fetching additional_info: %s", e)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.on_event("startup")
 async def startup_event():
     await create_tables()
