@@ -1,7 +1,6 @@
 from fastapi import FastAPI, Request, HTTPException, Query, Depends, BackgroundTasks
 from fastapi.responses import JSONResponse
-from typing import List
-import uvicorn
+from typing import List, Any
 import logging
 import os
 from scraper import CustomScraper
@@ -12,8 +11,6 @@ from model import ToolTable, ToolResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from redis_cache import RedisCache
 from playwright_setup import PlaywrightSetup
-from typing import Any
-from starlette.responses import Response
 import orjson
 
 
@@ -25,24 +22,12 @@ class ORJSONResponse(JSONResponse):
 
 
 URL_TO_SCRAP = os.getenv("URL_TO_SCRAP")
-IP_ADDRESSES = os.getenv("IP_ADDRESSES")
 logger = logging.getLogger(__name__)
 
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 
 app = FastAPI(default_response_class=ORJSONResponse)
-
-
-@app.middleware("http")
-async def whitelist_middleware(request: Request, call_next):
-    whitelist = IP_ADDRESSES.split(',')
-    client_ip = request.client.host
-    logger.info(f"Received request from IP address: {client_ip}")
-    if not any(client_ip.startswith(ip) for ip in whitelist):
-        logger.warning(f"Blocking request from IP address: {client_ip}")
-        return JSONResponse(status_code=403, content={"detail": "Access denied"})
-    return await call_next(request)
 
 
 @app.get("/tools", response_model=List[ToolResponse])
@@ -95,7 +80,6 @@ async def get_tools(
             result = await db.execute(query)
             tools = result.scalars().all()
             tools_data = [tool.to_dict() for tool in tools]
-            # Set a key with a TTL (Time To Live) of 24 hours
             background_tasks.add_task(
                 redis_cache.set_to_redis, cache_key, tools_data, expire=60*60*24)
 
@@ -118,7 +102,6 @@ async def get_additional_info(db: AsyncSession = Depends(get_db), redis_cache: R
             query = select(ToolTable.additional_info).distinct()
             result = await db.execute(query)
             additional_info_data = [row for row in result.scalars().all()]
-            # Set a key with a TTL (Time To Live) of 24 hours
             await redis_cache.set_to_redis(cache_key, additional_info_data, expire=60*60*24)
 
         return additional_info_data
