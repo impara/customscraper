@@ -41,6 +41,7 @@ async def startup_event_scrape(scrape_limit, scraper):
     finally:
         # After you're done with your scraping logic, close the browser and stop the Playwright process
         await playwright_setup.teardown()
+        await redis_cache.close()  # Close the Redis connection when done
 
 
 class CustomScraper(PlaywrightSetup):
@@ -257,6 +258,10 @@ class CustomScraper(PlaywrightSetup):
             logger.error(f"Error during scraping: {str(e)}")
         finally:
             await self.upsert_tool_data_to_redis()
+            # Ensure that the Redis connection is closed after scraping is done
+            if hasattr(self, 'redis_cache'):
+                await self.redis_cache.close()
+            logger.info("Finished scraping and closed Redis connection.")
 
     async def process_tool_url(self, tool_url):
         async with self.lock:

@@ -34,3 +34,9 @@ class RedisCache:
 
     async def exists(self, key):
         return await self.redis_pool.exists(key)
+
+    async def close(self):
+        """
+        Close the Redis connection pool.
+        """
+        await self.redis_pool.close()
