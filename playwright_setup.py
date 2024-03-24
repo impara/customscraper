@@ -9,6 +9,10 @@ class PlaywrightSetup:
         self.playwright = await async_playwright().start()
         self.browser = await self.playwright.chromium.launch(headless=True)
         self.context = await self.browser.new_context()
+
+        # Enable request interception to block unnecessary resources
+        await self.context.route("**/*", self.intercept_request)
+
         self.page = await self.context.new_page()
         await self.page.goto(self.base_url)
         return self.page
